@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance 交易工具</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">Binance 工具</a>
+            <div class="collapse navbar-collapse">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('account')">账户信息</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('trade')">交易</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('api')">设置 API</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div id="content">
+            <h2>欢迎使用 Binance 交易工具</h2>
+            <p>请选择一个操作。</p>
+        </div>
+    </div>
+
+    <script>
+        function loadContent(page) {
+            let content = document.getElementById("content");
+            if (page === "account") {
+                fetch('/account')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.message) {
+                            content.innerHTML = `<p>${data.message}</p>`;
+                        } else {
+                            content.innerHTML = `<h2>账户信息</h2><p>账户类型: ${data.account_type}</p><p>总余额: ${data.total_balance} USDT</p>`;
+                        }
+                    });
+            } else if (page === "trade") {
+                content.innerHTML = `
+                    <h2>交易</h2>
+                    <form onsubmit="submitTrade(event)">
+                        <label for="trade_type">交易类型:</label>
+                        <select id="trade_type" class="form-select">
+                            <option value="BUY">买入</option>
+                            <option value="SELL">卖出</option>
+                        </select>
+                        <label for="symbol">交易币种:</label>
+                        <input type="text" id="symbol" class="form-control" placeholder="如 BTCUSDT">
+                        <label for="quantity">交易数量:</label>
+                        <input type="number" id="quantity" class="form-control" step="0.01">
+                        <button type="submit" class="btn btn-primary mt-2">提交交易</button>
+                    </form>
+                    <p id="trade_result"></p>
+                `;
+            } else if (page === "api") {
+                content.innerHTML = `
+                    <h2>设置 API</h2>
+                    <form onsubmit="submitAPI(event)">
+                        <label for="api_key">API Key:</label>
+                        <input type="text" id="api_key" class="form-control">
+                        <label for="api_secret">API Secret:</label>
+                        <input type="password" id="api_secret" class="form-control">
+                        <button type="submit" class="btn btn-success mt-2">保存</button>
+                    </form>
+                    <p id="api_result"></p>
+                `;
+            }
+        }
+
+        function submitTrade(event) {
+            event.preventDefault();
+            let trade_type = document.getElementById("trade_type").value;
+            let symbol = document.getElementById("symbol").value.toUpperCase();
+            let quantity = document.getElementById("quantity").value;
+            fetch('/trade', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trade_type, symbol, quantity })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("trade_result").innerText = JSON.stringify(data, null, 2);
+            });
+        }
+
+        function submitAPI(event) {
+            event.preventDefault();
+            let api_key = document.getElementById("api_key").value;
+            let api_secret = document.getElementById("api_secret").value;
+            fetch('/set_api', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key, api_secret })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("api_result").innerText = data.message;
+            });
+        }
+    </script>
+</body>
+</html>
