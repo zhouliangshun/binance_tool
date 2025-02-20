@@ -13,15 +13,18 @@ Binance 交易工具
 1. 运行 CLI 模式: python script.py
 2. 选择 "启动 Web 服务器" 进入 Web 模式
 3. 使用 `python script.py --web` 直接启动 Web 服务器
+4. 在 PythonAnywhere 部署时，确保使用 `wsgi.py`
 """
 
 import os
-import keyring
+import json
 import webbrowser
 import argparse
 import threading
 from binance.client import Client
 from flask import Flask, request, jsonify, render_template
+
+CONFIG_FILE = "config.json"
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Binance Tool CLI')
@@ -29,22 +32,21 @@ def parse_args():
     return parser.parse_args()
 
 def get_api_key():
-    api_key = keyring.get_password("binance", "api_key")
-    api_secret = keyring.get_password("binance", "api_secret")
-    if not api_key or not api_secret:
-        return None, None
-    return api_key, api_secret
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r") as f:
+            data = json.load(f)
+            return data.get("api_key"), data.get("api_secret")
+    return None, None
 
 def set_api_key(api_key, api_secret):
     client = Client(api_key, api_secret)
     try:
         client.get_account()
-        keyring.set_password("binance", "api_key", api_key)
-        keyring.set_password("binance", "api_secret", api_secret)
+        with open(CONFIG_FILE, "w") as f:
+            json.dump({"api_key": api_key, "api_secret": api_secret}, f)
         return True
     except Exception as e:
-        print(f"API Key 无效: {e}")
-        return False
+        return str(e)
 
 def get_account_info(client):
     try:
@@ -53,8 +55,7 @@ def get_account_info(client):
         total_balance = sum(float(b['free']) + float(b['locked']) for b in balances)
         return {"account_type": account_info['accountType'], "total_balance": total_balance, "nickname": account_info.get('nickname', '未知')}
     except Exception as e:
-        print(f"获取账户信息失败: {e}")
-        return None
+        return str(e)
 
 def trade(client, trade_type, symbol, quantity):
     try:
@@ -69,19 +70,19 @@ def trade(client, trade_type, symbol, quantity):
 def cli_menu():
     while True:
         api_key, api_secret = get_api_key()
-        if not api_key or not api_secret or not set_api_key(api_key, api_secret):
+        if not api_key or not api_secret:
             api_key = input("请输入您的 Binance API Key: ")
             api_secret = input("请输入您的 Binance API Secret: ")
-            if not set_api_key(api_key, api_secret):
-                print("API Key 无效，请重新输入。")
+            result = set_api_key(api_key, api_secret)
+            if result is not True:
+                print(f"API Key 无效: {result}")
                 continue
         
         client = Client(api_key, api_secret)
         account_info = get_account_info(client)
-        if not account_info:
-            print("无法获取账户信息，请重新输入 API Key。")
-            keyring.delete_password("binance", "api_key")
-            keyring.delete_password("binance", "api_secret")
+        if isinstance(account_info, str):
+            print(f"无法获取账户信息: {account_info}")
+            os.remove(CONFIG_FILE)
             continue
         
         print(f"\n账户昵称: {account_info['nickname']}  总余额: {account_info['total_balance']}")
@@ -108,7 +109,7 @@ def cli_menu():
             print("无效输入，请重新选择。")
 
 def start_web_server():
-    threading.Thread(target=lambda: app.run(debug=True, use_reloader=False)).start()
+    app.run(host='0.0.0.0', port=5000)
 
 app = Flask(__name__)
 
@@ -121,9 +122,10 @@ def set_api():
     data = request.json
     api_key = data.get("api_key")
     api_secret = data.get("api_secret")
-    if set_api_key(api_key, api_secret):
+    result = set_api_key(api_key, api_secret)
+    if result is True:
         return jsonify({"message": "API Key 设置成功"}), 200
-    return jsonify({"message": "API Key 无效"}), 400
+    return jsonify({"message": f"API Key 无效: {result}"}), 400
 
 @app.route('/account', methods=['GET'])
 def account():
@@ -132,9 +134,9 @@ def account():
         return jsonify({"message": "请先设置 API Key"}), 400
     client = Client(api_key, api_secret)
     account_info = get_account_info(client)
-    if account_info:
+    if isinstance(account_info, dict):
         return jsonify(account_info)
-    return jsonify({"message": "获取账户信息失败"}), 400
+    return jsonify({"message": f"获取账户信息失败: {account_info}"}), 400
 
 @app.route('/trade', methods=['POST'])
 def trade_route():
@@ -153,6 +155,5 @@ if __name__ == "__main__":
     args = parse_args()
     if args.web:
         start_web_server()
-        webbrowser.open("http://127.0.0.1:5000/")
     else:
         cli_menu()
