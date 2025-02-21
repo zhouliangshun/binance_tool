@@ -5,43 +5,75 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance 交易工具</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reconnecting-websocket/1.0.0/reconnecting-websocket.min.js"></script>
+    <style>
+        .price-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .update-time {
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
 </head>
 <body>
+    <!-- 导航栏 -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">Binance 工具</a>
-            <div class="collapse navbar-collapse">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('account')">账户信息</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('trade')">交易</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('api')">设置 API</a></li>
-                </ul>
-            </div>
-        </div>
+      <div class="container-fluid">
+          <a class="navbar-brand" href="#" onclick="loadContent('home')">Binance 工具</a>
+          <div class="collapse navbar-collapse">
+              <ul class="navbar-nav me-auto">
+                  <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('account')">账户信息</a></li>
+                  <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('trade')">交易</a></li>
+                  <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('api')">设置 API</a></li>
+              </ul>
+          </div>
+      </div>
     </nav>
 
     <div class="container mt-4">
-        <div id="content">
-            <h2>欢迎使用 Binance 交易工具</h2>
-            <p>请选择一个操作。</p>
-        </div>
+        <div id="mainContent">
+            <h3 class="text-center">实时币价</h3>
+            <div class="row" id="prices"></div>
+        </div
     </div>
 
     <script>
+        // 定义10种常用币种代码
+        const cryptos = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "SOLUSDT", "DOTUSDT", "LTCUSDT", "MATICUSDT"];
+        // 用于存储上一次更新的币价信息
+        let lastPrices = {};
+
+        // 加载不同操作的内容
         function loadContent(page) {
-            let content = document.getElementById("content");
-            if (page === "account") {
+            let mainContent = document.getElementById("mainContent");
+            if(page === "home") {
+                mainContent.innerHTML = `
+                <h3 class='text-center'>实时币价</h3>
+                <div class='row' id='prices'></div>
+                `;
+                startWebSocket();
+            } else if (page === "account") {
                 fetch('/account')
                     .then(response => response.json())
                     .then(data => {
                         if (data.message) {
-                            content.innerHTML = `<p>${data.message}</p>`;
+                            mainContent.innerHTML = `<p>${data.message}</p>`;
                         } else {
-                            content.innerHTML = `<h2>账户信息</h2><p>账户类型: ${data.account_type}</p><p>总余额: ${data.total_balance} USDT</p>`;
+                            mainContent.innerHTML = `<h2>账户信息</h2>
+                            <p>账户类型: ${data.account_type}</p>
+                            <p>总余额: ${data.total_balance} USDT</p>`;
                         }
                     });
             } else if (page === "trade") {
-                content.innerHTML = `
+                mainContent.innerHTML = `
                     <h2>交易</h2>
                     <form onsubmit="submitTrade(event)">
                         <label for="trade_type">交易类型:</label>
@@ -50,7 +82,9 @@
                             <option value="SELL">卖出</option>
                         </select>
                         <label for="symbol">交易币种:</label>
-                        <input type="text" id="symbol" class="form-control" placeholder="如 BTCUSDT">
+                        <select id="symbol" class="form-select">
+                            ${cryptos.map(crypto => `<option value="${crypto}">${crypto}</option>`).join('')}
+                        </select>
                         <label for="quantity">交易数量:</label>
                         <input type="number" id="quantity" class="form-control" step="0.01">
                         <button type="submit" class="btn btn-primary mt-2">提交交易</button>
@@ -58,7 +92,7 @@
                     <p id="trade_result"></p>
                 `;
             } else if (page === "api") {
-                content.innerHTML = `
+                mainContent.innerHTML = `
                     <h2>设置 API</h2>
                     <form onsubmit="submitAPI(event)">
                         <label for="api_key">API Key:</label>
@@ -72,10 +106,11 @@
             }
         }
 
+        // 处理交易提交
         function submitTrade(event) {
             event.preventDefault();
             let trade_type = document.getElementById("trade_type").value;
-            let symbol = document.getElementById("symbol").value.toUpperCase();
+            let symbol = document.getElementById("symbol").value;
             let quantity = document.getElementById("quantity").value;
             fetch('/trade', {
                 method: 'POST',
@@ -88,6 +123,7 @@
             });
         }
 
+        // 处理 API 设置提交
         function submitAPI(event) {
             event.preventDefault();
             let api_key = document.getElementById("api_key").value;
@@ -102,6 +138,54 @@
                 document.getElementById("api_result").innerText = data.message;
             });
         }
+
+        // WebSocket 连接及处理逻辑
+        function startWebSocket() {
+            let ws = new ReconnectingWebSocket("wss://stream.binance.com:9443/ws/!ticker@arr");
+
+            ws.onmessage = function(event) {
+                let data = JSON.parse(event.data);
+                // 处理 PING 消息
+                if (data === 'PING') {
+                    ws.send('PONG');
+                    return;
+                }
+                // 筛选出关注的币种价格更新
+                let filteredPrices = data.filter(p => cryptos.includes(p.s));
+                let now = new Date().toLocaleTimeString();
+                filteredPrices.forEach(p => {
+                    lastPrices[p.s] = { price: p.c, time: now };
+                });
+                // 更新UI，若某币种未收到更新，则保留上次价格及时间
+                let priceList = document.getElementById("prices");
+                if(priceList) {
+                    priceList.innerHTML = cryptos.map(symbol => {
+                        let priceData = lastPrices[symbol] || { price: "--", time: "--" };
+                        return `
+                            <div class="col-md-3">
+                                <div class="price-card">
+                                    ${symbol}: <span class="text-success">${priceData.price} USDT</span>
+                                    <div class="update-time">更新时间: ${priceData.time}</div>
+                                </div>
+                            </div>`;
+                    }).join('');
+                }
+            };
+
+            ws.onopen = function() {
+                console.log("WebSocket 连接已打开");
+            };
+
+            ws.onclose = function() {
+                console.log("WebSocket 连接已关闭，尝试重连");
+            };
+
+            ws.onerror = function(error) {
+                console.error("WebSocket 错误:", error);
+            };
+        }
+
+        startWebSocket();
     </script>
 </body>
 </html>
