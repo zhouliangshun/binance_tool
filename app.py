@@ -16,15 +16,14 @@ Binance 交易工具
 4. 在 PythonAnywhere 部署时，确保使用 `wsgi.py`
 """
 
-import os
-import json
 import webbrowser
 import argparse
 import threading
+import keyring
 from binance.client import Client
 from flask import Flask, request, jsonify, render_template
 
-CONFIG_FILE = "config.json"
+KEYRING_SERVICE = "binance_tool"
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Binance Tool CLI')
@@ -32,18 +31,16 @@ def parse_args():
     return parser.parse_args()
 
 def get_api_key():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            data = json.load(f)
-            return data.get("api_key"), data.get("api_secret")
-    return None, None
+    api_key = keyring.get_password(KEYRING_SERVICE, "api_key")
+    api_secret = keyring.get_password(KEYRING_SERVICE, "api_secret")
+    return api_key, api_secret
 
 def set_api_key(api_key, api_secret):
     client = Client(api_key, api_secret)
     try:
         client.get_account()
-        with open(CONFIG_FILE, "w") as f:
-            json.dump({"api_key": api_key, "api_secret": api_secret}, f)
+        keyring.set_password(KEYRING_SERVICE, "api_key", api_key)
+        keyring.set_password(KEYRING_SERVICE, "api_secret", api_secret)
         return True
     except Exception as e:
         return str(e)
@@ -82,7 +79,8 @@ def cli_menu():
         account_info = get_account_info(client)
         if isinstance(account_info, str):
             print(f"无法获取账户信息: {account_info}")
-            os.remove(CONFIG_FILE)
+            keyring.delete_password(KEYRING_SERVICE, "api_key")
+            keyring.delete_password(KEYRING_SERVICE, "api_secret")
             continue
         
         print(f"\n账户昵称: {account_info['nickname']}  总余额: {account_info['total_balance']}")

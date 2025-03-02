@@ -154,7 +154,7 @@
                 let filteredPrices = data.filter(p => cryptos.includes(p.s));
                 let now = new Date().toLocaleTimeString();
                 filteredPrices.forEach(p => {
-                    lastPrices[p.s] = { price: p.c, time: now };
+                    lastPrices[p.s] = { price: new Number(p.c), time: now };
                 });
                 // 更新UI，若某币种未收到更新，则保留上次价格及时间
                 let priceList = document.getElementById("prices");
