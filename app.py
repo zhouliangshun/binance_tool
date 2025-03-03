@@ -27,6 +27,11 @@ from flask import Flask, request, jsonify, render_template
 
 KEYRING_SERVICE = "binance_tool"
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Binance Tool CLI')
+    parser.add_argument('--web', action='store_true', help='启动 Web 服务器')
+    return parser.parse_args()
+
 def init_keyring():
     try:
         if sys.platform.startswith('linux'):
