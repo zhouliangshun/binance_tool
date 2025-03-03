@@ -20,28 +20,61 @@ import webbrowser
 import argparse
 import threading
 import keyring
+import os
+import sys
 from binance.client import Client
 from flask import Flask, request, jsonify, render_template
 
 KEYRING_SERVICE = "binance_tool"
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Binance Tool CLI')
-    parser.add_argument('--web', action='store_true', help='启动 Web 服务器')
-    return parser.parse_args()
+def init_keyring():
+    try:
+        if sys.platform.startswith('linux'):
+            # 尝试使用 SecretService backend
+            try:
+                import secretstorage
+                keyring.set_keyring(keyring.backends.SecretService.Keyring())
+                return True
+            except Exception:
+                # 如果 SecretService 不可用，尝试使用文件系统 backend
+                try:
+                    from keyrings.cryptfile.cryptfile import CryptFileKeyring
+                    kr = CryptFileKeyring()
+                    # 使用环境变量作为加密密钥，如果未设置则使用默认值
+                    kr.keyring_key = os.environ.get('KEYRING_CRYPTFILE_PASSWORD', 'binance-tool-default-key')
+                    keyring.set_keyring(kr)
+                    return True
+                except Exception as e:
+                    print(f"警告: 无法初始化 keyring: {str(e)}")
+                    return False
+    except Exception as e:
+        print(f"警告: keyring 初始化失败: {str(e)}")
+        return False
+    return True
 
 def get_api_key():
-    api_key = keyring.get_password(KEYRING_SERVICE, "api_key")
-    api_secret = keyring.get_password(KEYRING_SERVICE, "api_secret")
-    return api_key, api_secret
+    if not init_keyring():
+        return None, None
+    try:
+        api_key = keyring.get_password(KEYRING_SERVICE, "api_key")
+        api_secret = keyring.get_password(KEYRING_SERVICE, "api_secret")
+        return api_key, api_secret
+    except Exception as e:
+        print(f"获取 API Key 失败: {str(e)}")
+        return None, None
 
 def set_api_key(api_key, api_secret):
+    if not init_keyring():
+        return "无法初始化 keyring 系统"
     client = Client(api_key, api_secret)
     try:
         client.get_account()
-        keyring.set_password(KEYRING_SERVICE, "api_key", api_key)
-        keyring.set_password(KEYRING_SERVICE, "api_secret", api_secret)
-        return True
+        try:
+            keyring.set_password(KEYRING_SERVICE, "api_key", api_key)
+            keyring.set_password(KEYRING_SERVICE, "api_secret", api_secret)
+            return True
+        except Exception as e:
+            return f"API Key 验证成功，但无法保存到 keyring: {str(e)}"
     except Exception as e:
         return str(e)
 
