@@ -12,14 +12,44 @@
             padding: 15px;
             border-radius: 10px;
             text-align: center;
-            font-size: 18px;
             font-weight: bold;
             margin-bottom: 10px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        .price-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
         }
         .update-time {
-            font-size: 14px;
+            font-size: 12px;
             color: #666;
+        }
+        .exchange-name {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .price-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .binance-section {
+            background-color: rgba(240, 185, 11, 0.05);
+            border-radius: 5px;
+            padding: 5px;
+        }
+        .okcoin-section {
+            background-color: rgba(255, 0, 0, 0.05);
+            border-radius: 5px;
+            padding: 5px;
+            border-left: 2px solid rgba(255, 0, 0, 0.3);
+        }
+        .symbol-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
         }
     </style>
 </head>
@@ -27,7 +57,7 @@
     <!-- 导航栏 -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <div class="container-fluid">
-          <a class="navbar-brand" href="#" onclick="loadContent('home')">Binance 工具</a>
+          <a class="navbar-brand" href="#" onclick="loadContent('home')">交易所工具</a>
           <div class="collapse navbar-collapse">
               <ul class="navbar-nav me-auto">
                   <li class="nav-item"><a class="nav-link" href="#" onclick="loadContent('account')">账户信息</a></li>
@@ -47,10 +77,13 @@
 
     <script>
         // 定义10种常用币种代码
-        const cryptos = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "SOLUSDT", "DOTUSDT", "LTCUSDT", "MATICUSDT"];
-        // 用于存储上一次更新的币价信息
-        let lastPrices = {};
-
+        const cryptos = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "SOLUSDT", "DOTUSDT", "LTCUSDT"];
+        // 用于存储上一次更新的币价信息，按交易所分类
+        let lastPrices = {
+            binance: {},
+            okcoin: {}
+        };
+        
         // 加载不同操作的内容
         function loadContent(page) {
             let mainContent = document.getElementById("mainContent");
@@ -59,7 +92,8 @@
                 <h3 class='text-center'>实时币价</h3>
                 <div class='row' id='prices'></div>
                 `;
-                startWebSocket();
+                // 同时启动两个交易所的价格获取
+                initializePrices();
             } else if (page === "account") {
                 fetch('/account')
                     .then(response => response.json())
@@ -141,51 +175,123 @@
 
         // WebSocket 连接及处理逻辑
         function startWebSocket() {
-            let ws = new ReconnectingWebSocket("wss://stream.binance.com:9443/ws/!ticker@arr");
+            // 清除可能存在的轮询定时器
+            if (window.pollingTimer) {
+                clearTimeout(window.pollingTimer);
+                window.pollingTimer = null;
+            }
+            
+            // 关闭已存在的WebSocket连接
+            if (window.priceWebSocket && window.priceWebSocket.readyState !== WebSocket.CLOSED) {
+                window.priceWebSocket.close();
+            }
+            
+            // 创建新的WebSocket连接
+            window.priceWebSocket = new ReconnectingWebSocket("wss://stream.binance.com:9443/ws/!ticker@arr");
 
-            ws.onmessage = function(event) {
+            window.priceWebSocket.onmessage = function(event) {
                 let data = JSON.parse(event.data);
                 // 处理 PING 消息
                 if (data === 'PING') {
-                    ws.send('PONG');
+                    window.priceWebSocket.send('PONG');
                     return;
                 }
                 // 筛选出关注的币种价格更新
                 let filteredPrices = data.filter(p => cryptos.includes(p.s));
                 let now = new Date().toLocaleTimeString();
                 filteredPrices.forEach(p => {
-                    lastPrices[p.s] = { price: new Number(p.c), time: now };
+                    lastPrices.binance[p.s] = { price: new Number(p.c), time: now };
                 });
-                // 更新UI，若某币种未收到更新，则保留上次价格及时间
-                let priceList = document.getElementById("prices");
-                if(priceList) {
-                    priceList.innerHTML = cryptos.map(symbol => {
-                        let priceData = lastPrices[symbol] || { price: "--", time: "--" };
-                        return `
-                            <div class="col-md-3">
-                                <div class="price-card">
-                                    ${symbol}: <span class="text-success">${priceData.price} USDT</span>
-                                    <div class="update-time">更新时间: ${priceData.time}</div>
-                                </div>
-                            </div>`;
-                    }).join('');
-                }
+                // 更新UI
+                updatePriceDisplay();
             };
 
-            ws.onopen = function() {
-                console.log("WebSocket 连接已打开");
+            window.priceWebSocket.onopen = function() {
+                console.log("Binance WebSocket 连接已打开");
             };
 
-            ws.onclose = function() {
-                console.log("WebSocket 连接已关闭，尝试重连");
+            window.priceWebSocket.onclose = function() {
+                console.log("Binance WebSocket 连接已关闭，尝试重连");
+                setTimeout(startWebSocket, 2000);
             };
 
-            ws.onerror = function(error) {
-                console.error("WebSocket 错误:", error);
+            window.priceWebSocket.onerror = function(error) {
+                console.log("Binance WebSocket 错误:", error);
             };
         }
 
-        startWebSocket();
+        // 轮询获取OKCoin Japan价格
+        function startPolling() {
+            // 初始化价格显示
+            updatePriceDisplay();
+            
+            // 开始轮询
+            function fetchPrices() {
+                fetch(`/prices?symbols=${cryptos.join(',')}&exchange=okcoin`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.prices) {
+                            let now = new Date().toLocaleTimeString();
+                            Object.entries(data.prices).forEach(([symbol, price]) => {
+                                lastPrices.okcoin[symbol] = { price: price, time: now };
+                            });
+                            updatePriceDisplay();
+                        }
+                    })
+                    .catch(error => console.error('获取OKCoin Japan价格失败:', error))
+                    .finally(() => {
+                        window.pollingTimer = setTimeout(fetchPrices, 5000); // 5秒轮询一次
+                    });
+            }
+            
+            fetchPrices();
+        }
+        
+        // 更新价格显示
+        function updatePriceDisplay() {
+            let priceList = document.getElementById("prices");
+            if(priceList) {
+                priceList.innerHTML = cryptos.map(symbol => {
+                    let binanceData = lastPrices.binance[symbol] || { price: "--", time: "--" };
+                    let okcoinData = lastPrices.okcoin[symbol] || { price: "--", time: "--" };
+                    
+                    return `
+                        <div class="col-md-4 mb-3">
+                            <div class="price-card">
+                                <div class="symbol-title">${symbol}</div>
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="binance-section">
+                                            <div class="exchange-name">Binance</div>
+                                            <div class="price-value text-success">${binanceData.price}</div>
+                                            <div class="update-time">更新: ${binanceData.time}</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="okcoin-section">
+                                            <div class="exchange-name">OKCoin Japan</div>
+                                            <div class="price-value text-success">¥${okcoinData.price}</div>
+                                            <div class="update-time">更新: ${okcoinData.time}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+        }
+        
+        // 页面加载时初始化
+        function initializePrices() {
+            // 同时启动WebSocket和轮询，获取两个交易所的价格
+            startWebSocket(); // 获取Binance价格
+            startPolling();   // 获取OKCoin价格
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initializePrices();
+        });
     </script>
 </body>
 </html>

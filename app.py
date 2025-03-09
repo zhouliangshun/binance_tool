@@ -22,8 +22,10 @@ import threading
 import keyring
 import os
 import sys
+import json
 from binance.client import Client
 from flask import Flask, request, jsonify, render_template
+from exchange_api import create_exchange_api, BinanceAPI, OKCoinAPI
 
 KEYRING_SERVICE = "binance_tool"
 
@@ -361,14 +363,14 @@ def cli_menu():
             print(result)
         elif choice == "4":
             start_web_server()
-            webbrowser.open("http://127.0.0.1:5000/")
+            webbrowser.open("http://127.0.0.1:5001/")
         elif choice == "5":
             break
         else:
             print("无效输入，请重新选择。")
 
 def start_web_server():
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)
 
 app = Flask(__name__)
 
@@ -396,6 +398,74 @@ def account():
     if isinstance(account_info, dict):
         return jsonify(account_info)
     return jsonify({"message": f"获取账户信息失败: {account_info}"}), 400
+
+@app.route('/price', methods=['GET'])
+def get_price():
+    symbol = request.args.get('symbol', 'BTCUSDT')
+    exchange = request.args.get('exchange', 'binance')
+    try:
+        # 创建交易所API实例
+        # 只有Binance需要API密钥，OKCoin Japan可以获取公开市场数据
+        api_key, api_secret = None, None
+        if exchange.lower() == 'binance':
+            api_key, api_secret = get_api_key()
+        
+        api = create_exchange_api(exchange, api_key, api_secret)
+        price = api.get_ticker_price(symbol)
+        if price is not None:
+            return jsonify({
+                "symbol": symbol,
+                "price": price,
+                "exchange": exchange,
+                "time": time.time()
+            })
+        return jsonify({"message": f"获取{symbol}价格失败"}), 400
+    except Exception as e:
+        return jsonify({"message": f"获取价格失败: {str(e)}"}), 400
+
+@app.route('/prices', methods=['GET'])
+def get_prices():
+    symbols = request.args.get('symbols', '')
+    exchange = request.args.get('exchange', 'binance')
+    symbols_list = [s.strip().upper() for s in symbols.split(',')] if symbols else []
+    try:
+        print(f"获取价格请求: exchange={exchange}, symbols={symbols}")
+        # 创建交易所API实例
+        # 只有Binance需要API密钥，OKCoin Japan可以获取公开市场数据
+        api_key, api_secret = None, None
+        if exchange.lower() == 'binance':
+            api_key, api_secret = get_api_key()
+            if not api_key or not api_secret:
+                print(f"警告: Binance API密钥未设置或无效")
+        
+        api = create_exchange_api(exchange, api_key, api_secret)
+        print(f"成功创建{exchange}交易所API实例")
+        
+        # 如果是OKCoin，在日志中显示为OKCoin Japan
+        display_exchange = "OKCoin Japan" if exchange.lower() == "okcoin" else exchange
+        
+        if not symbols_list:
+            # 如果没有指定交易对，返回所有价格
+            print(f"尝试获取{exchange}所有交易对价格")
+            prices = api.get_all_tickers()
+            print(f"成功获取{exchange}所有价格，共{len(prices)}个交易对")
+        else:
+            # 否则只返回指定交易对的价格
+            print(f"尝试获取{exchange}指定交易对价格: {symbols_list}")
+            prices = api._fetch_prices(symbols_list)
+            print(f"获取{exchange}指定交易对价格结果: {len(prices)}个交易对")
+        
+        import time
+        return jsonify({
+            "prices": prices,
+            "exchange": "OKCoin Japan" if exchange.lower() == "okcoin" else exchange,
+            "time": time.time()
+        })
+    except Exception as e:
+        import traceback
+        print(f"获取{exchange}价格失败: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({"message": f"获取价格失败: {str(e)}"}), 400
 
 @app.route('/trade', methods=['POST'])
 def trade_route():
